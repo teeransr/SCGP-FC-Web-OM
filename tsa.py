@@ -678,3 +678,44 @@ class TSA(object):
                 self.app.updateProgress(all_skus,ind)
             
         return results
+
+
+    def input_data(self,blob_name):
+        LOCALFILENAME = f"./inbound/{blob_name}"
+        blob_client_instance = self.blob_service_client_instance.get_blob_client(
+            self.CONTAINERNAME, blob_name, snapshot=None)
+        with open(LOCALFILENAME, "wb") as my_blob:
+            blob_data = blob_client_instance.download_blob()
+            blob_data.readinto(my_blob)
+        dataframe_blobdata = pd.read_csv(LOCALFILENAME,sep='|')
+        return dataframe_blobdata
+
+
+    def gen_file(self,predictions,blob_output_name):
+    	try:
+	    	predictions.to_csv(f"./outbound/{blob_output_name}", index=False, sep='|') #genfile
+	    except:
+	    	print("error gen_file")
+
+
+    def output_data(self,blob_output_name):
+        blob_client = self.blob_service_client_instance.get_blob_client(
+            container=self.CONTAINERNAME, blob=blob_output_name)
+
+        LOCALFILENAME = f"./outbound/{blob_output_name}"
+
+        with open(LOCALFILENAME, "rb") as data:
+            blob_client.upload_blob(data)
+
+
+    def main():
+        df=input_data(blob_name=None)
+        tsa = TSA(df)
+        predictions = tsa.forecast()
+        gen_file(predictions,blob_output_name=None)
+        output_data(blob_output_name=None) #'D:/TPC_Forecast/02_Files/output_csv/demandplan_paper.csv'
+
+
+
+if __name__ == "__main__":
+    main():
