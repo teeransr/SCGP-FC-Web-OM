@@ -3,6 +3,7 @@ import pandas as pd
 import datetime as dt
 from azure.storage.blob import BlobServiceClient
 from dateutil.relativedelta import relativedelta
+from scipy.optimize.optimize import main
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_squared_error
@@ -11,18 +12,17 @@ import threading as th
 import warnings
 import time
 
-class TSA(object):
-    def __init__(self, df_raw, app=None):
-        self.app = app
-        self.df_raw = pd.DataFrame(df_raw)
 
+class TSA(object):
+    def __init__(self,app=None):
+        self.app = app
         self.STORAGEACCOUNTURL = "https://tpcomctrlmstoragedev.blob.core.windows.net"
         self.STORAGEACCOUNTKEY = "sC3rTzpCCefCKa80UY2+U8F76O8esw92NrQMa5TyOSeXb81Y3OKvp6MdCEY2hCKB32ip1mYgAhvC+T9SDFZ+dQ=="
         self.CONTAINERNAME = "scgp-fc-web-python"
         self.blob_service_client_instance = BlobServiceClient(account_url=self.STORAGEACCOUNTURL, credential=self.STORAGEACCOUNTKEY)
-
         self.VALID_COLUMNS = ['Year', 'Month', 'Element', 'Volume']
         self.MONTHS = {'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6,'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
+        self.df_raw=self.input_data('historical_sales_paper.txt')
 
         self.MODELS = {
             0:self.LinearReg, 
@@ -85,7 +85,7 @@ class TSA(object):
         #filter too short ts
         new_tsdic = dict()
         for i in tsdic.keys():
-            if len(tsdic[i]) >= THRESHOLD:
+            if len(tsdic[i]) >= self.THRESHOLD:
                 new_tsdic[i]=tsdic[i]
                 
         tsdic = new_tsdic
@@ -101,7 +101,7 @@ class TSA(object):
             tt = tsdic[j]
             
             lastM = tt.index.max()
-            fence = self.Max_Date + relativedelta(months=-INACTIVE_MONTH)
+            fence = self.Max_Date + relativedelta(months=-self.INACTIVE_MONTH)
             # filter out inactive sku
             if lastM >= fence:
                 new_tsdic[j] = tt.reindex(pd.date_range(start=tt.index.min(),
@@ -261,14 +261,14 @@ class TSA(object):
             return acc
         else:
             trainy = dfData[0][0]
-            pred = rolling_avg(trainy, MA_PERIODS, FORECAST_PERIODS)
+            pred = rolling_avg(trainy, self.MA_PERIODS, self.FORECAST_PERIODS)
             return pred
                     
     
     def SMA(self, dfData, dfIndices, isPredict):
         #choose whether it uses the selected period or not
-        if MA_SELECT:
-            pr = range(MA_PERIODS,MA_PERIODS+1)
+        if self.MA_SELECT:
+            pr = range(self.MA_PERIODS,self.MA_PERIODS+1)
             return self.SimpleMovingAvg(dfData, dfIndices, isPredict, pr)
         else:
             pr = range(3,6)
@@ -317,8 +317,8 @@ class TSA(object):
             return wacc
         else:
             trainy = dfData[0][0]
-            pred = rolling_ets(trainy, FORECAST_PERIODS, alpha, beta)
-            pred = pred[-FORECAST_PERIODS:]
+            pred = rolling_ets(trainy, self.FORECAST_PERIODS, alpha, beta)
+            pred = pred[-self.FORECAST_PERIODS:]
             return pred
         
     
@@ -341,7 +341,7 @@ class TSA(object):
             return acc
         else:
             # return prediction
-            return self.ExpoSmth(dfData, dfIndices, True,EMA_ALPHA, EMA_BETA)
+            return self.ExpoSmth(dfData, dfIndices, True,self.EMA_ALPHA, self.EMA_BETA)
     
     # Enumerated Holt-Winters version
     def ExpHW1(self, dfData, dfIndices, isPredict):
@@ -432,20 +432,20 @@ class TSA(object):
             trainy = dfData[0][0]
             Y = [float(trainy[m:m+1]['Vol']) for m in range(len(trainy))]
             
-            alpha = HW_ALPHA
-            beta = HW_BETA
-            gamma = HW_GAMMA
+            alpha = self.HW_ALPHA
+            beta = self.HW_BETA
+            gamma = self.HW_GAMMA
             
             #initialize level, trend, seasonal, forecast
-            a = [sum(Y[0:SEASONAL])/float(SEASONAL)]
-            b = [(sum(Y[SEASONAL:SEASONAL*2]) - sum(Y[0:SEASONAL]))/ 
-                 float(SEASONAL**2)]
-            s = [Y[k] - a[0] for k in range(SEASONAL)]
+            a = [sum(Y[0:self.SEASONAL])/float(self.SEASONAL)]
+            b = [(sum(Y[self.SEASONAL:self.SEASONAL*2]) - sum(Y[0:self.SEASONAL]))/ 
+                 float(self.SEASONAL**2)]
+            s = [Y[k] - a[0] for k in range(self.SEASONAL)]
             y = [(a[0]+b[0]) + s[0]]
             
-            for j in range(len(Y)+FORECAST_PERIODS):
+            for j in range(len(Y)+self.FORECAST_PERIODS):
                 if j==len(Y):
-                    Y.append((a[-1] + b[-1]) + s[-SEASONAL])
+                    Y.append((a[-1] + b[-1]) + s[-self.SEASONAL])
                 
                 a.append(alpha * (Y[j] - s[j]) + (1 - alpha) * (a[j] + b[j]))
                 b.append(beta * (a[j + 1] - a[j]) + (1 - beta) * b[j])
@@ -453,7 +453,7 @@ class TSA(object):
                 y.append((a[j + 1] + b[j + 1]) + s[j + 1])
             
             print('alpha:',alpha, 'beta:',beta,'gamma:',gamma)
-            return Y[-FORECAST_PERIODS:]
+            return Y[-self.FORECAST_PERIODS:]
     
     
     def ARIMA(self, dfData, dfIndices, isPredict):
@@ -519,10 +519,10 @@ class TSA(object):
         
         else:
             trainy = dfData[0][0]
-            order = (ARIMA_P, ARIMA_D, ARIMA_Q)
+            order = (self.ARIMA_P, self.ARIMA_D, self.ARIMA_Q)
             model = ar(trainy, order)
             model = model.fit()
-            pred = model.forecast(FORECAST_PERIODS)
+            pred = model.forecast(self.FORECAST_PERIODS)
             return list(pred[0])
     
     
@@ -550,12 +550,12 @@ class TSA(object):
         #Curve-fitting - 1
         accCurvFit = self.CurveFitting(ListOfTuples, ListOfIndices, False)
         AccScore.append(accCurvFit)
-        print("Curve-fitting("+str(CF_DEGREE)+"):", accCurvFit)
+        print("Curve-fitting("+str(self.CF_DEGREE)+"):", accCurvFit)
         
         #Simple Moving Average - 2
         accSMA = self.SMA(ListOfTuples, ListOfIndices, False)
         AccScore.append(accSMA)
-        print("SMA("+str(MA_PERIODS)+"):",accSMA)
+        print("SMA("+str(self.MA_PERIODS)+"):",accSMA)
         
         #Exponential Smoothing - 3
         accEMA = self.EMA(ListOfTuples, ListOfIndices, False)
@@ -585,7 +585,7 @@ class TSA(object):
         
         #Forecast data using the chosen model (least error)
         buildIndices = [i for i in range(1,len(data)+1)]
-        predIndices = [j for j in range(len(data)+1,len(data)+1+FORECAST_PERIODS)]
+        predIndices = [j for j in range(len(data)+1,len(data)+1+self.FORECAST_PERIODS)]
         
         model = None
         
@@ -616,7 +616,7 @@ class TSA(object):
         
         print(data)
         start = self.Max_Date + relativedelta(months=+1)
-        end = self.Max_Date + relativedelta(months=+FORECAST_PERIODS)
+        end = self.Max_Date + relativedelta(months=+self.FORECAST_PERIODS)
         dtRange = pd.date_range(start=start, end=end, freq='MS')
         dtRange = dtRange.strftime('%Y-%m')
         pred = pd.DataFrame(model, columns=['Vol'], index = dtRange)
@@ -687,18 +687,15 @@ class TSA(object):
         with open(LOCALFILENAME, "wb") as my_blob:
             blob_data = blob_client_instance.download_blob()
             blob_data.readinto(my_blob)
-        dataframe_blobdata = pd.read_csv(LOCALFILENAME,sep='|')
+        dataframe_blobdata = pd.read_csv(LOCALFILENAME,sep='|',encoding= 'unicode_escape')
         return dataframe_blobdata
 
 
     def gen_file(self,predictions,blob_output_name):
-    	try:
-	    	predictions.to_csv(f"./outbound/{blob_output_name}", index=False, sep='|') #genfile
-	    except:
-	    	print("error gen_file")
+    		predictions.to_csv(f"./outbound/{blob_output_name}", index=False, sep='|') #genfile
 
 
-    def output_data(self,blob_output_name):
+    def upload_data_toblob(self,blob_output_name):
         blob_client = self.blob_service_client_instance.get_blob_client(
             container=self.CONTAINERNAME, blob=blob_output_name)
 
@@ -708,14 +705,13 @@ class TSA(object):
             blob_client.upload_blob(data)
 
 
-    def main():
-        df=input_data(blob_name=None)
-        tsa = TSA(df)
-        predictions = tsa.forecast()
-        gen_file(predictions,blob_output_name=None)
-        output_data(blob_output_name=None) #'D:/TPC_Forecast/02_Files/output_csv/demandplan_paper.csv'
+    def main(self,blob_output_name):
+        predictions = obj_projection.forecast()
+        obj_projection.gen_file(predictions,blob_output_name)
+        obj_projection.upload_data_toblob(blob_output_name)
 
 
+if __name__=='__main__':
+    obj_projection = TSA()
+    obj_projection.main('test.txt')
 
-if __name__ == "__main__":
-    main():
